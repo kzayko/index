@@ -1,0 +1,176 @@
+version: '3.8'
+
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - index-network
+
+  generate-kafka-config:
+    image: python:3.11-slim
+    volumes:
+      - .:/app
+      - kafka-config:/output
+    working_dir: /app
+    environment:
+      - KAFKA_ADMIN_USERNAME=${KAFKA_ADMIN_USERNAME:-kafka_admin}
+      - KAFKA_ADMIN_PASSWORD=${KAFKA_ADMIN_PASSWORD:-kafka_admin_password_123}
+      - KAFKA_USERNAME=${KAFKA_USERNAME:-indexer_user}
+      - KAFKA_PASSWORD=${KAFKA_PASSWORD:-indexer_password_123}
+      - PRODUCER_USERNAME=${PRODUCER_USERNAME:-producer_user}
+      - PRODUCER_PASSWORD=${PRODUCER_PASSWORD:-producer_password_123}
+    command: >
+      sh -c "
+      pip install -q python-dotenv &&
+      [ -f secrets.env ] && export $(cat secrets.env | grep -v '^#' | xargs) || true &&
+      python generate_kafka_jaas.py &&
+      cp kafka-jaas.conf /output/
+      "
+    networks:
+      - index-network
+    restart: "no"
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    depends_on:
+      - zookeeper
+      - generate-kafka-config
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: SASL_PLAINTEXT://localhost:9092,SASL_PLAINTEXT_INTERNAL://kafka:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: SASL_PLAINTEXT:SASL_PLAINTEXT,SASL_PLAINTEXT_INTERNAL:SASL_PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: SASL_PLAINTEXT_INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_SASL_ENABLED_MECHANISMS: PLAIN
+      KAFKA_SASL_MECHANISM_INTER_BROKER_PROTOCOL: PLAIN
+      KAFKA_OPTS: -Djava.security.auth.login.config=/etc/kafka/kafka-jaas.conf
+      KAFKA_USERNAME: ${KAFKA_USERNAME:-indexer_user}
+      KAFKA_PASSWORD: ${KAFKA_PASSWORD:-indexer_password_123}
+    volumes:
+      - kafka-config:/etc/kafka:ro
+    networks:
+      - index-network
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=true
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD:-elastic_password_123}
+      - ELASTICSEARCH_APP_USERNAME=${ELASTICSEARCH_APP_USERNAME:-app_user}
+      - ELASTICSEARCH_APP_PASSWORD=${ELASTICSEARCH_APP_PASSWORD:-app_password_123}
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    networks:
+      - index-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -u elastic:${ELASTIC_PASSWORD:-elastic_password_123} -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.11.0
+    depends_on:
+      - elasticsearch
+    ports:
+      - "5601:5601"
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - ELASTICSEARCH_USERNAME=elastic
+      - ELASTICSEARCH_PASSWORD=${ELASTIC_PASSWORD:-elastic_password_123}
+    networks:
+      - index-network
+
+  setup-elasticsearch:
+    image: curlimages/curl:latest
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    environment:
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD:-elastic_password_123}
+      - ELASTICSEARCH_HOST=http://elasticsearch:9200
+      - ELASTICSEARCH_APP_USERNAME=${ELASTICSEARCH_APP_USERNAME:-app_user}
+      - ELASTICSEARCH_APP_PASSWORD=${ELASTICSEARCH_APP_PASSWORD:-app_password_123}
+    volumes:
+      - ./setup_elasticsearch_users.sh:/setup.sh:ro
+    command: ["/bin/sh", "/setup.sh"]
+    networks:
+      - index-network
+    restart: "no"
+
+  indexer:
+    build: .
+    depends_on:
+      kafka:
+        condition: service_started
+      elasticsearch:
+        condition: service_healthy
+      setup-elasticsearch:
+        condition: service_completed_successfully
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - KAFKA_TOPIC=${KAFKA_TOPIC:-messages}
+      - KAFKA_GROUP_ID=${KAFKA_GROUP_ID:-indexer-group}
+      - KAFKA_SECURITY_PROTOCOL=SASL_PLAINTEXT
+      - KAFKA_SASL_MECHANISM=PLAIN
+      - KAFKA_SASL_USERNAME=${KAFKA_USERNAME:-indexer_user}
+      - KAFKA_SASL_PASSWORD=${KAFKA_PASSWORD:-indexer_password_123}
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - ELASTICSEARCH_INDEX=${ELASTICSEARCH_INDEX:-messages_index}
+      - ELASTICSEARCH_USERNAME=${ELASTICSEARCH_APP_USERNAME:-app_user}
+      - ELASTICSEARCH_PASSWORD=${ELASTICSEARCH_APP_PASSWORD:-app_password_123}
+      - ELASTICSEARCH_USE_SSL=false
+      - ELASTICSEARCH_VERIFY_CERTS=false
+    volumes:
+      - ./.env:/app/.env:ro
+      - ./secrets.env:/app/secrets.env:ro
+    networks:
+      - index-network
+    command: python indexer.py
+    restart: unless-stopped
+
+  api:
+    build: .
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+      setup-elasticsearch:
+        condition: service_completed_successfully
+    ports:
+      - "8000:8000"
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - ELASTICSEARCH_INDEX=${ELASTICSEARCH_INDEX:-messages_index}
+      - ELASTICSEARCH_USERNAME=${ELASTICSEARCH_APP_USERNAME:-app_user}
+      - ELASTICSEARCH_PASSWORD=${ELASTICSEARCH_APP_PASSWORD:-app_password_123}
+      - ELASTICSEARCH_USE_SSL=false
+      - ELASTICSEARCH_VERIFY_CERTS=false
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+    volumes:
+      - ./.env:/app/.env:ro
+      - ./secrets.env:/app/secrets.env:ro
+    networks:
+      - index-network
+    command: python -m uvicorn api:app --host 0.0.0.0 --port 8000
+    restart: unless-stopped
+
+volumes:
+  elasticsearch-data:
+  kafka-config:
+
+networks:
+  index-network:
+    driver: bridge

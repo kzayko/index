@@ -1,0 +1,24 @@
+{
+    "kafkaClientId": "giga-click",
+    "kafkaClientVersion": "01.000.00-1961",
+    "time": 1748345560,
+    "event_type": "gigaback_request_generated",
+    "user_id": "135",
+    "app_name": "tg",
+    "event_properties": {
+        "text": "Вот стих, посвященный телефону доверия 8-800-2000-122:\n\n---\n\nКуда звонить, коль тяжело душе,  \nОбиды гложут, слёзы льются рекой?  \nНаш добрый друг нам скажет:  \n«Будь спокоен, дорогой!»  \nНабери восьмерочку простую:  \nВосемь восемьсот, два ноля подряд,  \nЗа ними две двойки идут рядком,  \nОдин-два-два — вот помощь твоего друга!\n\n---\n\nЭто стихотворение подчеркивает доступность и поддержку, которую оказывает этот телефон доверия каждому нуждающемуся человеку.",
+        "model_type": "GigaChat-2-Max",
+        "message_id": "79aac8d6-faf8-4068-a7e4-8c37fd2b678c",
+        "linked_message_id": "2aa3c31d-8a46-4605-81a3-fcdc757f60e7",
+        "chat_id": "a87e85e2-443f-4dd2-b09c-9da7635c5e18",
+        "finish_reason": "stop",
+        "response_types": [
+            "TEXT"
+        ],
+        "conversation_id": "7197907836",
+        "external_session_id": "b785cf95-c580-498c-977c-4b15d17d407f",
+        "bot_id": "1",
+        "request_id": "1c26062f-7b1f-4748-b473-119154bcc444",
+        "chat_type": "DEFAULT"
+    }
+}
