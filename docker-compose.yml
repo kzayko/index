@@ -16,6 +16,7 @@ services:
       - kafka-config:/output
     working_dir: /app
     environment:
+      # Load from secrets.env file (will override defaults)
       - KAFKA_ADMIN_USERNAME=${KAFKA_ADMIN_USERNAME:-kafka_admin}
       - KAFKA_ADMIN_PASSWORD=${KAFKA_ADMIN_PASSWORD:-kafka_admin_password_123}
       - KAFKA_USERNAME=${KAFKA_USERNAME:-indexer_user}
@@ -25,7 +26,6 @@ services:
     command: >
       sh -c "
       pip install -q python-dotenv &&
-      [ -f secrets.env ] && export $(cat secrets.env | grep -v '^#' | xargs) || true &&
       python generate_kafka_jaas.py &&
       cp kafka-jaas.conf /output/
       "
@@ -40,6 +40,8 @@ services:
       - generate-kafka-config
     ports:
       - "9092:9092"
+    env_file:
+      - secrets.env
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
@@ -54,12 +56,14 @@ services:
       KAFKA_USERNAME: ${KAFKA_USERNAME:-indexer_user}
       KAFKA_PASSWORD: ${KAFKA_PASSWORD:-indexer_password_123}
     volumes:
-      - kafka-config:/etc/kafka:ro
+      - kafka-config:/etc/kafka
     networks:
       - index-network
 
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    env_file:
+      - secrets.env
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=true
@@ -86,6 +90,8 @@ services:
       - elasticsearch
     ports:
       - "5601:5601"
+    env_file:
+      - secrets.env
     environment:
       - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
       - ELASTICSEARCH_USERNAME=elastic
@@ -99,12 +105,14 @@ services:
       elasticsearch:
         condition: service_healthy
     environment:
+      # Load from secrets.env file (will override defaults)
       - ELASTIC_PASSWORD=${ELASTIC_PASSWORD:-elastic_password_123}
       - ELASTICSEARCH_HOST=http://elasticsearch:9200
       - ELASTICSEARCH_APP_USERNAME=${ELASTICSEARCH_APP_USERNAME:-app_user}
       - ELASTICSEARCH_APP_PASSWORD=${ELASTICSEARCH_APP_PASSWORD:-app_password_123}
     volumes:
       - ./setup_elasticsearch_users.sh:/setup.sh:ro
+      - ./secrets.env:/app/secrets.env:ro
     command: ["/bin/sh", "/setup.sh"]
     networks:
       - index-network
@@ -119,6 +127,9 @@ services:
         condition: service_healthy
       setup-elasticsearch:
         condition: service_completed_successfully
+    env_file:
+      - secrets.env
+      - .env
     environment:
       - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
       - KAFKA_TOPIC=${KAFKA_TOPIC:-messages}
@@ -150,6 +161,9 @@ services:
         condition: service_completed_successfully
     ports:
       - "8000:8000"
+    env_file:
+      - secrets.env
+      - .env
     environment:
       - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
       - ELASTICSEARCH_INDEX=${ELASTICSEARCH_INDEX:-messages_index}

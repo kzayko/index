@@ -5,6 +5,16 @@ import sys
 import time
 import requests
 from requests.auth import HTTPBasicAuth
+from dotenv import load_dotenv
+
+# Load secrets.env if it exists (override with environment variables)
+secrets_path = os.path.join(os.path.dirname(__file__), 'secrets.env')
+if os.path.exists(secrets_path):
+    load_dotenv(secrets_path, override=False)
+# Also try /app/secrets.env for Docker
+docker_secrets_path = '/app/secrets.env'
+if os.path.exists(docker_secrets_path):
+    load_dotenv(docker_secrets_path, override=False)
 
 ELASTIC_PASSWORD = os.getenv('ELASTIC_PASSWORD', 'elastic_password_123')
 ELASTICSEARCH_HOST = os.getenv('ELASTICSEARCH_HOST', 'http://localhost:9200')

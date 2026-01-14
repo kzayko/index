@@ -26,8 +26,8 @@ JAAS_CONFIG = f"""KafkaServer {{
 
 Client {{
     org.apache.kafka.common.security.plain.PlainLoginModule required
-    username="{KAFKA_ADMIN_USERNAME}"
-    password="{KAFKA_ADMIN_PASSWORD}";
+    username=""
+    password="";
 }};
 """
 

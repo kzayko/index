@@ -1,9 +1,12 @@
 #!/bin/sh
 # Script to create Elasticsearch users and roles
 # This script should be run after Elasticsearch is started
+# Uses environment variables (loaded from secrets.env via docker-compose env_file)
 
 set -e
 
+# Variables are already loaded from secrets.env via docker-compose env_file
+# Use defaults if not set
 ELASTIC_PASSWORD=${ELASTIC_PASSWORD:-elastic_password_123}
 ELASTICSEARCH_HOST=${ELASTICSEARCH_HOST:-http://elasticsearch:9200}
 APP_USERNAME=${ELASTICSEARCH_APP_USERNAME:-app_user}

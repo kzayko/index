@@ -3,7 +3,7 @@ import json
 import logging
 from typing import Optional, Dict, Any, List
 from elasticsearch import Elasticsearch
-from elasticsearch.exceptions import ElasticsearchException
+from elasticsearch import ApiError
 from config import ElasticsearchConfig
 
 logger = logging.getLogger(__name__)
@@ -59,7 +59,7 @@ class ElasticsearchClient:
             self.client.indices.create(index=self.index_name, mappings=mappings)
             logger.info(f"Index {self.index_name} created successfully")
             return True
-        except ElasticsearchException as e:
+        except Exception as e:
             logger.error(f"Error creating index: {e}")
             return False
     
@@ -89,7 +89,7 @@ class ElasticsearchClient:
             )
             logger.debug(f"Document indexed: {doc_id}")
             return True
-        except ElasticsearchException as e:
+        except Exception as e:
             logger.error(f"Error indexing document: {e}")
             return False
     
@@ -130,7 +130,7 @@ class ElasticsearchClient:
             success, failed = bulk(self.client, actions)
             logger.info(f"Bulk indexed: {success} successful, {len(failed)} failed")
             return success
-        except ElasticsearchException as e:
+        except Exception as e:
             logger.error(f"Error in bulk indexing: {e}")
             return 0
     
@@ -166,6 +166,6 @@ class ElasticsearchClient:
                 for hit in response["hits"]["hits"]
             ]
             return message_ids
-        except ElasticsearchException as e:
+        except Exception as e:
             logger.error(f"Error searching: {e}")
             return []

@@ -4,7 +4,16 @@
 
 set -e
 
-source secrets.env 2>/dev/null || true
+# Load secrets.env if it exists
+if [ -f secrets.env ]; then
+    set -a
+    source secrets.env
+    set +a
+elif [ -f /app/secrets.env ]; then
+    set -a
+    source /app/secrets.env
+    set +a
+fi
 
 KAFKA_ADMIN_USERNAME=${KAFKA_ADMIN_USERNAME:-kafka_admin}
 KAFKA_ADMIN_PASSWORD=${KAFKA_ADMIN_PASSWORD:-kafka_admin_password_123}
