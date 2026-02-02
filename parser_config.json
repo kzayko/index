@@ -1,0 +1,30 @@
+{
+  "csv_columns": {
+    "timestamp": "1711958929",
+    "user_id": "0",
+    "event_data": "{\"agent_id\":\"91730b22-bcb0-48b4-a566-d53f777d5d56\",\"character_type\":\"OWN\",\"system_prompt\":\"Девушка 24 года, черные кудрявые волосы. Общительная\"}",
+    "event_type": "gigaback_agent_created"
+  },
+  "description": "Column names from CSV file. First row contains column headers. Map to actual CSV column names.",
+  "event_type_filter": [
+    "gigaback_request_generated",
+    "gigaback_request_created"
+  ],
+  "event_data_fields": {
+    "chat_id": "chat_id",
+    "message_id": "message_id",
+    "text": "text"
+  },
+  "required_fields": [
+    "user_id",
+    "chat_id",
+    "message_id",
+    "text"
+  ],
+  "output_format": {
+    "kafkaClientId": "csv-processor",
+    "kafkaClientVersion": "1.0.0",
+    "event_type": "gigaback_request_generated",
+    "app_name": "csv"
+  }
+}

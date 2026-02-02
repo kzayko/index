@@ -17,8 +17,28 @@ class IndexerService:
     
     def __init__(self):
         """Initialize the indexer service."""
+        import time
+        
+        # Wait a bit for Kafka to be ready
+        logger.info("Waiting for Kafka to be ready...")
+        time.sleep(5)
+        
         self.es_client = ElasticsearchClient()
-        self.kafka_consumer = KafkaMessageConsumer()
+        
+        # Retry Kafka consumer initialization
+        max_retries = 5
+        for attempt in range(max_retries):
+            try:
+                self.kafka_consumer = KafkaMessageConsumer()
+                break
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    logger.warning(f"Failed to initialize Kafka consumer (attempt {attempt + 1}/{max_retries}): {e}")
+                    time.sleep(5)
+                else:
+                    logger.error(f"Failed to initialize Kafka consumer after {max_retries} attempts: {e}")
+                    raise
+        
         self.running = True
         
         # Setup signal handlers for graceful shutdown

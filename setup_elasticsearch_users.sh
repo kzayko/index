@@ -6,11 +6,17 @@
 set -e
 
 # Variables are already loaded from secrets.env via docker-compose env_file
-# Use defaults if not set
-ELASTIC_PASSWORD=${ELASTIC_PASSWORD:-elastic_password_123}
+# Must be set in secrets.env (no defaults)
+ELASTIC_PASSWORD=${ELASTIC_PASSWORD}
 ELASTICSEARCH_HOST=${ELASTICSEARCH_HOST:-http://elasticsearch:9200}
-APP_USERNAME=${ELASTICSEARCH_APP_USERNAME:-app_user}
-APP_PASSWORD=${ELASTICSEARCH_APP_PASSWORD:-app_password_123}
+APP_USERNAME=${ELASTICSEARCH_APP_USERNAME}
+APP_PASSWORD=${ELASTICSEARCH_APP_PASSWORD}
+
+# Validate required variables
+if [ -z "$ELASTIC_PASSWORD" ] || [ -z "$APP_USERNAME" ] || [ -z "$APP_PASSWORD" ]; then
+    echo "Error: Required variables not set. Please set ELASTIC_PASSWORD, ELASTICSEARCH_APP_USERNAME, and ELASTICSEARCH_APP_PASSWORD in secrets.env"
+    exit 1
+fi
 
 echo "Waiting for Elasticsearch to be ready..."
 max_retries=30

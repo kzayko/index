@@ -9,14 +9,7 @@ services:
     working_dir: /app
     env_file:
       - secrets.env
-    environment:
-      # Load from secrets.env file (will override defaults)
-      - KAFKA_ADMIN_USERNAME=${KAFKA_ADMIN_USERNAME:-kafka_admin}
-      - KAFKA_ADMIN_PASSWORD=${KAFKA_ADMIN_PASSWORD:-kafka_admin_password_123}
-      - KAFKA_USERNAME=${KAFKA_USERNAME:-indexer_user}
-      - KAFKA_PASSWORD=${KAFKA_PASSWORD:-indexer_password_123}
-      - PRODUCER_USERNAME=${PRODUCER_USERNAME:-producer_user}
-      - PRODUCER_PASSWORD=${PRODUCER_PASSWORD:-producer_password_123}
+    # Variables are loaded from secrets.env via env_file
     command: >
       sh -c "
       pip install -q python-dotenv &&
@@ -52,8 +45,7 @@ services:
       KAFKA_SASL_ENABLED_MECHANISMS: PLAIN
       KAFKA_SASL_MECHANISM_INTER_BROKER_PROTOCOL: PLAIN
       KAFKA_OPTS: -Djava.security.auth.login.config=/mnt/kafka-config/kafka-jaas.conf
-      KAFKA_USERNAME: ${KAFKA_USERNAME:-indexer_user}
-      KAFKA_PASSWORD: ${KAFKA_PASSWORD:-indexer_password_123}
+      # KAFKA_USERNAME and KAFKA_PASSWORD loaded from secrets.env via env_file
       # Log directories for KRaft
       KAFKA_LOG_DIRS: /var/lib/kafka/data
       CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
@@ -70,9 +62,7 @@ services:
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=true
-      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD:-elastic_password_123}
-      - ELASTICSEARCH_APP_USERNAME=${ELASTICSEARCH_APP_USERNAME:-app_user}
-      - ELASTICSEARCH_APP_PASSWORD=${ELASTICSEARCH_APP_PASSWORD:-app_password_123}
+      # Elasticsearch credentials loaded from secrets.env via env_file (no need to specify here)
       - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
     ports:
       - "9200:9200"
@@ -82,7 +72,7 @@ services:
     networks:
       - index-network
     healthcheck:
-      test: ["CMD-SHELL", "curl -u elastic:${ELASTIC_PASSWORD:-elastic_password_123} -f http://localhost:9200/_cluster/health || exit 1"]
+      test: ["CMD-SHELL", "curl -u elastic:$ELASTIC_PASSWORD -f http://localhost:9200/_cluster/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -98,7 +88,8 @@ services:
     environment:
       - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
       - ELASTICSEARCH_USERNAME=elastic
-      - ELASTICSEARCH_PASSWORD=${ELASTIC_PASSWORD:-elastic_password_123}
+      # ELASTIC_PASSWORD loaded from secrets.env via env_file
+      - ELASTICSEARCH_PASSWORD=${ELASTIC_PASSWORD}=${ELASTIC_PASSWORD}
     networks:
       - index-network
 
@@ -107,12 +98,14 @@ services:
     depends_on:
       elasticsearch:
         condition: service_healthy
+    env_file:
+      - secrets.env
     environment:
-      # Load from secrets.env file (will override defaults)
-      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD:-elastic_password_123}
-      - ELASTICSEARCH_HOST=http://elasticsearch:9200
-      - ELASTICSEARCH_APP_USERNAME=${ELASTICSEARCH_APP_USERNAME:-app_user}
-      - ELASTICSEARCH_APP_PASSWORD=${ELASTICSEARCH_APP_PASSWORD:-app_password_123}
+      # Variables loaded from secrets.env via env_file
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD}
+      - ELASTICSEARCH_HOST=${ELASTICSEARCH_HOST:-http://elasticsearch:9200}
+      - ELASTICSEARCH_APP_USERNAME=${ELASTICSEARCH_APP_USERNAME}
+      - ELASTICSEARCH_APP_PASSWORD=${ELASTICSEARCH_APP_PASSWORD}
     volumes:
       - ./setup_elasticsearch_users.sh:/setup.sh:ro
       - ./secrets.env:/app/secrets.env:ro
@@ -139,12 +132,14 @@ services:
       - KAFKA_GROUP_ID=${KAFKA_GROUP_ID:-indexer-group}
       - KAFKA_SECURITY_PROTOCOL=SASL_PLAINTEXT
       - KAFKA_SASL_MECHANISM=PLAIN
-      - KAFKA_SASL_USERNAME=${KAFKA_USERNAME:-indexer_user}
-      - KAFKA_SASL_PASSWORD=${KAFKA_PASSWORD:-indexer_password_123}
+      # KAFKA_SASL_USERNAME and KAFKA_SASL_PASSWORD loaded from secrets.env via env_file
+      - KAFKA_SASL_USERNAME=${KAFKA_USERNAME}
+      - KAFKA_SASL_PASSWORD=${KAFKA_PASSWORD}
       - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
       - ELASTICSEARCH_INDEX=${ELASTICSEARCH_INDEX:-messages_index}
-      - ELASTICSEARCH_USERNAME=${ELASTICSEARCH_APP_USERNAME:-app_user}
-      - ELASTICSEARCH_PASSWORD=${ELASTICSEARCH_APP_PASSWORD:-app_password_123}
+      # Elasticsearch credentials loaded from secrets.env via env_file
+      - ELASTICSEARCH_USERNAME=${ELASTICSEARCH_APP_USERNAME}
+      - ELASTICSEARCH_PASSWORD=${ELASTICSEARCH_APP_PASSWORD}
       - ELASTICSEARCH_USE_SSL=false
       - ELASTICSEARCH_VERIFY_CERTS=false
     volumes:
@@ -170,8 +165,9 @@ services:
     environment:
       - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
       - ELASTICSEARCH_INDEX=${ELASTICSEARCH_INDEX:-messages_index}
-      - ELASTICSEARCH_USERNAME=${ELASTICSEARCH_APP_USERNAME:-app_user}
-      - ELASTICSEARCH_PASSWORD=${ELASTICSEARCH_APP_PASSWORD:-app_password_123}
+      # Elasticsearch credentials loaded from secrets.env via env_file
+      - ELASTICSEARCH_USERNAME=${ELASTICSEARCH_APP_USERNAME}
+      - ELASTICSEARCH_PASSWORD=${ELASTICSEARCH_APP_PASSWORD}
       - ELASTICSEARCH_USE_SSL=false
       - ELASTICSEARCH_VERIFY_CERTS=false
       - API_HOST=0.0.0.0

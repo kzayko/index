@@ -46,6 +46,7 @@ kafka-jaas.conf
 # Processing state
 processing_state.json
 *.csv.tmp
+parsed_messages.json
 
 # OS
 .DS_Store

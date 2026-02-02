@@ -6,9 +6,16 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Load secrets.env if it exists (for runtime secrets)
-secrets_path = os.path.join(os.path.dirname(__file__), 'secrets.env')
-if os.path.exists(secrets_path):
-    load_dotenv(secrets_path, override=False)
+# Try multiple paths: local, /app (Docker), and current directory
+secrets_paths = [
+    os.path.join(os.path.dirname(__file__), 'secrets.env'),
+    '/app/secrets.env',
+    'secrets.env'
+]
+for secrets_path in secrets_paths:
+    if os.path.exists(secrets_path):
+        load_dotenv(secrets_path, override=True)  # Override with secrets
+        break
 
 
 class KafkaConfig:
@@ -18,8 +25,10 @@ class KafkaConfig:
     GROUP_ID = os.getenv('KAFKA_GROUP_ID', 'indexer-group')
     SECURITY_PROTOCOL = os.getenv('KAFKA_SECURITY_PROTOCOL', 'PLAINTEXT')
     SASL_MECHANISM = os.getenv('KAFKA_SASL_MECHANISM', '')
-    SASL_USERNAME = os.getenv('KAFKA_SASL_USERNAME', '')
-    SASL_PASSWORD = os.getenv('KAFKA_SASL_PASSWORD', '')
+    # Support both KAFKA_SASL_USERNAME and KAFKA_USERNAME
+    SASL_USERNAME = os.getenv('KAFKA_SASL_USERNAME') or os.getenv('KAFKA_USERNAME', '')
+    # Support both KAFKA_SASL_PASSWORD and KAFKA_PASSWORD
+    SASL_PASSWORD = os.getenv('KAFKA_SASL_PASSWORD') or os.getenv('KAFKA_PASSWORD', '')
     SSL_CAFILE = os.getenv('KAFKA_SSL_CAFILE', '')
     SSL_CERTFILE = os.getenv('KAFKA_SSL_CERTFILE', '')
     SSL_KEYFILE = os.getenv('KAFKA_SSL_KEYFILE', '')

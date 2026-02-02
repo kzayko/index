@@ -8,12 +8,25 @@ secrets_path = os.path.join(os.path.dirname(__file__), 'secrets.env')
 if os.path.exists(secrets_path):
     load_dotenv(secrets_path, override=True)  # Override environment variables with secrets.env
 
-KAFKA_ADMIN_USERNAME = os.getenv('KAFKA_ADMIN_USERNAME', 'kafka_admin')
-KAFKA_ADMIN_PASSWORD = os.getenv('KAFKA_ADMIN_PASSWORD', 'kafka_admin_password_123')
-KAFKA_USERNAME = os.getenv('KAFKA_USERNAME', 'indexer_user')
-KAFKA_PASSWORD = os.getenv('KAFKA_PASSWORD', 'indexer_password_123')
-PRODUCER_USERNAME = os.getenv('PRODUCER_USERNAME', 'producer_user')
-PRODUCER_PASSWORD = os.getenv('PRODUCER_PASSWORD', 'producer_password_123')
+# Load from environment (must be set from secrets.env)
+KAFKA_ADMIN_USERNAME = os.getenv('KAFKA_ADMIN_USERNAME')
+KAFKA_ADMIN_PASSWORD = os.getenv('KAFKA_ADMIN_PASSWORD')
+KAFKA_USERNAME = os.getenv('KAFKA_USERNAME')
+KAFKA_PASSWORD = os.getenv('KAFKA_PASSWORD')
+PRODUCER_USERNAME = os.getenv('PRODUCER_USERNAME')
+PRODUCER_PASSWORD = os.getenv('PRODUCER_PASSWORD')
+
+# Validate that all required variables are set
+if not all([KAFKA_ADMIN_USERNAME, KAFKA_ADMIN_PASSWORD, KAFKA_USERNAME, KAFKA_PASSWORD, PRODUCER_USERNAME, PRODUCER_PASSWORD]):
+    missing = [var for var, val in [
+        ('KAFKA_ADMIN_USERNAME', KAFKA_ADMIN_USERNAME),
+        ('KAFKA_ADMIN_PASSWORD', KAFKA_ADMIN_PASSWORD),
+        ('KAFKA_USERNAME', KAFKA_USERNAME),
+        ('KAFKA_PASSWORD', KAFKA_PASSWORD),
+        ('PRODUCER_USERNAME', PRODUCER_USERNAME),
+        ('PRODUCER_PASSWORD', PRODUCER_PASSWORD)
+    ] if not val]
+    raise ValueError(f"Missing required environment variables: {', '.join(missing)}. Please set them in secrets.env")
 
 JAAS_CONFIG = f"""KafkaServer {{
     org.apache.kafka.common.security.plain.PlainLoginModule required

@@ -15,6 +15,13 @@ class KafkaMessageConsumer:
     def __init__(self):
         """Initialize Kafka consumer."""
         config = KafkaConfig.get_consumer_config()
+        
+        # Log configuration (without password)
+        logger.info(f"Kafka consumer config: bootstrap_servers={config.get('bootstrap_servers')}, "
+                   f"security_protocol={config.get('security_protocol')}, "
+                   f"sasl_mechanism={config.get('sasl_mechanism')}, "
+                   f"username={config.get('sasl_plain_username')}")
+        
         self.consumer = KafkaConsumer(
             KafkaConfig.TOPIC,
             value_deserializer=lambda m: json.loads(m.decode('utf-8')),

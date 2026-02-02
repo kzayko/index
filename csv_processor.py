@@ -75,11 +75,26 @@ class StateManager:
 class CSVProcessor:
     """Processes CSV files and sends messages to Kafka."""
     
-    def __init__(self, data_dir: str = 'data', state_file: str = 'processing_state.json'):
+    def __init__(self, data_dir: str = 'data', state_file: str = 'processing_state.json', config_file: str = 'parser_config.json'):
         """Initialize CSV processor."""
         self.data_dir = Path(data_dir)
         self.state_manager = StateManager(state_file)
         self.producer = KafkaMessageProducer()
+        self.config = self._load_config(config_file)
+    
+    def _load_config(self, config_file: str) -> Dict[str, Any]:
+        """Load parser configuration from JSON file."""
+        config_path = Path(config_file)
+        if not config_path.exists():
+            logger.warning(f"Configuration file not found: {config_path}, using defaults")
+            return {}
+        
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as e:
+            logger.error(f"Failed to load configuration: {e}, using defaults")
+            return {}
     
     def decompress_lz4(self, file_path: Path) -> Optional[str]:
         """Decompress lz4 file and return temporary CSV file path."""
@@ -89,85 +104,157 @@ class CSVProcessor:
             
             decompressed_data = lz4.frame.decompress(compressed_data)
             
-            # Create temporary file for CSV
-            temp_csv = file_path.with_suffix('.csv.tmp')
+            # Create temporary file for CSV in /tmp to avoid read-only filesystem issues
+            import tempfile
+            temp_dir = tempfile.gettempdir()
+            temp_csv = os.path.join(temp_dir, f"{file_path.stem}.csv.tmp")
             with open(temp_csv, 'wb') as f:
                 f.write(decompressed_data)
             
-            logger.info(f"Decompressed {file_path.name} to {temp_csv.name}")
-            return str(temp_csv)
+            logger.info(f"Decompressed {file_path.name} to {temp_csv}")
+            return temp_csv
         except Exception as e:
             logger.error(f"Failed to decompress {file_path}: {e}")
             return None
     
-    def csv_row_to_message(self, row: Dict[str, Any], row_index: int) -> Optional[Dict[str, Any]]:
+    def csv_row_to_message(self, row: pd.Series, row_index: int) -> Optional[Dict[str, Any]]:
         """
         Convert CSV row to message format (as in message.json).
         
-        Expected CSV columns (adjust based on your actual CSV structure):
-        - user_id
-        - chat_id
-        - message_id (or generate if missing)
-        - text
-        - time (optional, or use current timestamp)
-        
-        Additional fields can be mapped from CSV or set to defaults.
+        Uses configuration from parser_config.json to map columns and extract data.
         """
         try:
-            # Extract required fields from CSV row
-            user_id = str(row.get('user_id', ''))
-            chat_id = str(row.get('chat_id', ''))
-            message_id = str(row.get('message_id', ''))
-            text = str(row.get('text', ''))
-            
-            # Validate required fields
-            if not all([user_id, chat_id, message_id, text]):
-                logger.warning(f"Row {row_index} missing required fields: user_id={user_id}, "
-                             f"chat_id={chat_id}, message_id={message_id}, text={'present' if text else 'missing'}")
-                return None
-            
-            # Generate message_id if missing
-            if not message_id or message_id == 'nan':
-                message_id = str(uuid.uuid4())
-            
-            # Get timestamp from CSV or use current time
-            timestamp = row.get('time')
-            if not timestamp or timestamp == 'nan':
-                timestamp = int(datetime.now().timestamp())
+            # If config is available, use it
+            if self.config and 'csv_columns' in self.config:
+                return self._parse_row_with_config(row, row_index)
             else:
-                try:
-                    timestamp = int(float(timestamp))
-                except (ValueError, TypeError):
-                    timestamp = int(datetime.now().timestamp())
-            
-            # Build message in format from message.json
-            message = {
-                "kafkaClientId": "csv-processor",
-                "kafkaClientVersion": "1.0.0",
-                "time": timestamp,
-                "event_type": "gigaback_request_generated",
-                "user_id": user_id,
-                "app_name": row.get('app_name', 'csv'),
-                "event_properties": {
-                    "text": text,
-                    "model_type": row.get('model_type', 'CSV-Import'),
-                    "message_id": message_id,
-                    "linked_message_id": row.get('linked_message_id', ''),
-                    "chat_id": chat_id,
-                    "finish_reason": row.get('finish_reason', 'stop'),
-                    "response_types": ["TEXT"] if row.get('response_types') else ["TEXT"],
-                    "conversation_id": row.get('conversation_id', ''),
-                    "external_session_id": row.get('external_session_id', ''),
-                    "bot_id": row.get('bot_id', '1'),
-                    "request_id": row.get('request_id', str(uuid.uuid4())),
-                    "chat_type": row.get('chat_type', 'DEFAULT')
-                }
-            }
-            
-            return message
+                # Fallback to old method
+                return self._parse_row_legacy(row, row_index)
         except Exception as e:
             logger.error(f"Error converting row {row_index} to message: {e}")
             return None
+    
+    def _parse_row_with_config(self, row: pd.Series, row_index: int) -> Optional[Dict[str, Any]]:
+        """Parse row using configuration file."""
+        csv_cols = self.config['csv_columns']
+        event_type_col = csv_cols['event_type']
+        timestamp_col = csv_cols['timestamp']
+        user_id_col = csv_cols['user_id']
+        event_data_col = csv_cols['event_data']
+        
+        # Check event type filter
+        event_type = str(row[event_type_col]) if pd.notna(row[event_type_col]) else ''
+        if event_type not in self.config.get('event_type_filter', []):
+            return None  # Skip rows that don't match event type filter
+        
+        # Extract user_id
+        user_id = str(row[user_id_col]) if pd.notna(row[user_id_col]) else ''
+        
+        # Extract timestamp
+        timestamp = row[timestamp_col]
+        if pd.notna(timestamp):
+            try:
+                timestamp = int(float(timestamp))
+            except (ValueError, TypeError):
+                timestamp = int(datetime.now().timestamp())
+        else:
+            timestamp = int(datetime.now().timestamp())
+        
+        # Parse event_data JSON
+        event_data_str = str(row[event_data_col]) if pd.notna(row[event_data_col]) else '{}'
+        try:
+            event_data = json.loads(event_data_str)
+        except json.JSONDecodeError as e:
+            logger.warning(f"Row {row_index} - Failed to parse event_data JSON: {e}")
+            return None
+        
+        # Extract required fields from event_data
+        event_data_fields = self.config['event_data_fields']
+        chat_id = str(event_data.get(event_data_fields['chat_id'], ''))
+        message_id = str(event_data.get(event_data_fields['message_id'], ''))
+        text = str(event_data.get(event_data_fields['text'], ''))
+        
+        # Validate required fields
+        required = self.config.get('required_fields', ['user_id', 'chat_id', 'message_id', 'text'])
+        if not all([user_id, chat_id, message_id, text]):
+            logger.warning(f"Row {row_index} missing required fields: user_id={bool(user_id)}, "
+                         f"chat_id={bool(chat_id)}, message_id={bool(message_id)}, text={bool(text)}")
+            return None
+        
+        # Build message in format from message.json
+        output_format = self.config.get('output_format', {})
+        message = {
+            "kafkaClientId": output_format.get("kafkaClientId", "csv-processor"),
+            "kafkaClientVersion": output_format.get("kafkaClientVersion", "1.0.0"),
+            "time": timestamp,
+            "event_type": event_type,
+            "user_id": user_id,
+            "app_name": output_format.get("app_name", "csv"),
+            "event_properties": {
+                "text": text,
+                "message_id": message_id,
+                "chat_id": chat_id,
+                "model_type": event_data.get('model_type', 'CSV-Import'),
+                "linked_message_id": event_data.get('linked_message_id', ''),
+                "finish_reason": event_data.get('finish_reason', 'stop'),
+                "response_types": event_data.get('response_types', ['TEXT']),
+                "conversation_id": event_data.get('conversation_id', ''),
+                "external_session_id": event_data.get('external_session_id', ''),
+                "bot_id": event_data.get('bot_id', '1'),
+                "request_id": event_data.get('request_id', ''),
+                "chat_type": event_data.get('chat_type', 'DEFAULT')
+            }
+        }
+        
+        return message
+    
+    def _parse_row_legacy(self, row: pd.Series, row_index: int) -> Optional[Dict[str, Any]]:
+        """Legacy parsing method (fallback)."""
+        row_dict = row.to_dict()
+        user_id = str(row_dict.get('user_id', ''))
+        chat_id = str(row_dict.get('chat_id', ''))
+        message_id = str(row_dict.get('message_id', ''))
+        text = str(row_dict.get('text', ''))
+        
+        if not all([user_id, chat_id, message_id, text]):
+            return None
+        
+        if not message_id or message_id == 'nan':
+            message_id = str(uuid.uuid4())
+        
+        timestamp = row_dict.get('time')
+        if not timestamp or timestamp == 'nan':
+            timestamp = int(datetime.now().timestamp())
+        else:
+            try:
+                timestamp = int(float(timestamp))
+            except (ValueError, TypeError):
+                timestamp = int(datetime.now().timestamp())
+        
+        message = {
+            "kafkaClientId": "csv-processor",
+            "kafkaClientVersion": "1.0.0",
+            "time": timestamp,
+            "event_type": "gigaback_request_generated",
+            "user_id": user_id,
+            "app_name": row_dict.get('app_name', 'csv'),
+            "event_properties": {
+                "text": text,
+                "model_type": row_dict.get('model_type', 'CSV-Import'),
+                "message_id": message_id,
+                "linked_message_id": row_dict.get('linked_message_id', ''),
+                "chat_id": chat_id,
+                "finish_reason": row_dict.get('finish_reason', 'stop'),
+                "response_types": ["TEXT"],
+                "conversation_id": row_dict.get('conversation_id', ''),
+                "external_session_id": row_dict.get('external_session_id', ''),
+                "bot_id": row_dict.get('bot_id', '1'),
+                "request_id": row_dict.get('request_id', str(uuid.uuid4())),
+                "chat_type": row_dict.get('chat_type', 'DEFAULT')
+            }
+        }
+        
+        return message
     
     def process_file(self, file_path: Path) -> int:
         """
@@ -216,7 +303,7 @@ class CSVProcessor:
                     continue
                 
                 # Convert row to message
-                message = self.csv_row_to_message(row.to_dict(), idx)
+                message = self.csv_row_to_message(row, idx)
                 
                 if message:
                     # Send to Kafka
