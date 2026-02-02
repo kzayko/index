@@ -50,6 +50,33 @@ class KafkaConfig:
             config['ssl_keyfile'] = cls.SSL_KEYFILE
             
         return config
+    
+    @classmethod
+    def get_producer_config(cls):
+        """Get Kafka producer configuration."""
+        config = {
+            'bootstrap_servers': cls.BOOTSTRAP_SERVERS.split(','),
+        }
+        
+        if cls.SECURITY_PROTOCOL != 'PLAINTEXT':
+            config['security_protocol'] = cls.SECURITY_PROTOCOL
+            
+        if cls.SASL_MECHANISM:
+            config['sasl_mechanism'] = cls.SASL_MECHANISM
+            # Use producer credentials if available, otherwise use indexer credentials
+            producer_username = os.getenv('PRODUCER_USERNAME', cls.SASL_USERNAME)
+            producer_password = os.getenv('PRODUCER_PASSWORD', cls.SASL_PASSWORD)
+            config['sasl_plain_username'] = producer_username
+            config['sasl_plain_password'] = producer_password
+            
+        if cls.SSL_CAFILE:
+            config['ssl_cafile'] = cls.SSL_CAFILE
+        if cls.SSL_CERTFILE:
+            config['ssl_certfile'] = cls.SSL_CERTFILE
+        if cls.SSL_KEYFILE:
+            config['ssl_keyfile'] = cls.SSL_KEYFILE
+            
+        return config
 
 
 class ElasticsearchConfig:

@@ -44,11 +44,32 @@ class KafkaMessageConsumer:
         """
         Extract required fields from Kafka message.
         
+        Message format (from message.json):
+        {
+            "user_id": "...",  # at root level
+            "event_properties": {
+                "chat_id": "...",
+                "message_id": "...",
+                "text": "..."
+            },
+            "time": ...  # optional timestamp
+        }
+        
+        Only these fields are extracted and indexed:
+        - user_id (from root)
+        - chat_id (from event_properties)
+        - message_id (from event_properties)
+        - text (from event_properties)
+        - timestamp (from root, optional)
+        
+        All other fields from the message are ignored.
+        
         Args:
-            message: Raw message from Kafka
+            message: Raw message from Kafka (format as in message.json)
             
         Returns:
-            Dictionary with user_id, chat_id, message_id, text or None if missing fields
+            Dictionary with only user_id, chat_id, message_id, text, timestamp
+            or None if any required field is missing
         """
         try:
             # Extract user_id from root level
@@ -59,19 +80,24 @@ class KafkaMessageConsumer:
             
             # Extract other fields from event_properties
             event_properties = message.get('event_properties', {})
+            if not isinstance(event_properties, dict):
+                logger.warning("event_properties is not a dictionary")
+                return None
+                
             chat_id = event_properties.get('chat_id')
             message_id = event_properties.get('message_id')
             text = event_properties.get('text')
             
-            # Validate all required fields
+            # Validate all required fields are present and not empty
             if not all([user_id, chat_id, message_id, text]):
                 logger.warning(f"Missing required fields in message: user_id={user_id}, "
                              f"chat_id={chat_id}, message_id={message_id}, text={'present' if text else 'missing'}")
                 return None
             
-            # Extract timestamp if available
+            # Extract timestamp if available (optional field)
             timestamp = message.get('time')
             
+            # Return only the required fields - all other fields from message.json are ignored
             return {
                 'user_id': str(user_id),
                 'chat_id': str(chat_id),

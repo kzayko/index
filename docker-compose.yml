@@ -7,6 +7,8 @@ services:
       - .:/app
       - kafka-config:/output
     working_dir: /app
+    env_file:
+      - secrets.env
     environment:
       # Load from secrets.env file (will override defaults)
       - KAFKA_ADMIN_USERNAME=${KAFKA_ADMIN_USERNAME:-kafka_admin}
@@ -49,14 +51,14 @@ services:
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
       KAFKA_SASL_ENABLED_MECHANISMS: PLAIN
       KAFKA_SASL_MECHANISM_INTER_BROKER_PROTOCOL: PLAIN
-      KAFKA_OPTS: -Djava.security.auth.login.config=/etc/kafka/kafka-jaas.conf
+      KAFKA_OPTS: -Djava.security.auth.login.config=/mnt/kafka-config/kafka-jaas.conf
       KAFKA_USERNAME: ${KAFKA_USERNAME:-indexer_user}
       KAFKA_PASSWORD: ${KAFKA_PASSWORD:-indexer_password_123}
       # Log directories for KRaft
       KAFKA_LOG_DIRS: /var/lib/kafka/data
       CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
     volumes:
-      - kafka-config:/etc/kafka
+      - kafka-config:/mnt/kafka-config:ro
       - kafka-data:/var/lib/kafka/data
     networks:
       - index-network

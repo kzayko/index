@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 # Load secrets.env if it exists (override with environment variables)
 secrets_path = os.path.join(os.path.dirname(__file__), 'secrets.env')
 if os.path.exists(secrets_path):
-    load_dotenv(secrets_path, override=False)
+    load_dotenv(secrets_path, override=True)  # Override environment variables with secrets.env
 
 KAFKA_ADMIN_USERNAME = os.getenv('KAFKA_ADMIN_USERNAME', 'kafka_admin')
 KAFKA_ADMIN_PASSWORD = os.getenv('KAFKA_ADMIN_PASSWORD', 'kafka_admin_password_123')

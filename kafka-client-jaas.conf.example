@@ -1,0 +1,8 @@
+# JAAS configuration for Kafka clients (Offset Explorer, etc.)
+# Copy this file and replace <PASSWORD> with actual password from secrets.env
+
+KafkaClient {
+    org.apache.kafka.common.security.plain.PlainLoginModule required
+    username="kafka_admin"
+    password="<PASSWORD_FROM_KAFKA_ADMIN_PASSWORD>";
+};

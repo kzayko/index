@@ -67,6 +67,15 @@ class ElasticsearchClient:
         """
         Index a single document.
         
+        Only the following fields are indexed:
+        - user_id (required)
+        - chat_id (required)
+        - message_id (required, used as document ID)
+        - text (required)
+        - timestamp (optional)
+        
+        All other fields are ignored.
+        
         Args:
             document: Document to index (must contain user_id, chat_id, message_id, text)
             
@@ -82,10 +91,24 @@ class ElasticsearchClient:
         try:
             # Use message_id as document ID to prevent duplicates
             doc_id = document['message_id']
+            
+            # Create a clean document with only the fields we want to index
+            # This ensures no extra fields from the original message are indexed
+            clean_document = {
+                'user_id': document['user_id'],
+                'chat_id': document['chat_id'],
+                'message_id': document['message_id'],
+                'text': document['text']
+            }
+            
+            # Add timestamp if present
+            if 'timestamp' in document and document['timestamp'] is not None:
+                clean_document['timestamp'] = document['timestamp']
+            
             self.client.index(
                 index=self.index_name,
                 id=doc_id,
-                document=document
+                document=clean_document
             )
             logger.debug(f"Document indexed: {doc_id}")
             return True
@@ -96,6 +119,15 @@ class ElasticsearchClient:
     def bulk_index(self, documents: List[Dict[str, Any]]) -> int:
         """
         Bulk index multiple documents.
+        
+        Only the following fields are indexed for each document:
+        - user_id (required)
+        - chat_id (required)
+        - message_id (required, used as document ID)
+        - text (required)
+        - timestamp (optional)
+        
+        All other fields are ignored.
         
         Args:
             documents: List of documents to index
@@ -114,11 +146,23 @@ class ElasticsearchClient:
             if not all(field in doc for field in required_fields):
                 logger.warning(f"Skipping document missing required fields: {doc}")
                 continue
+            
+            # Create a clean document with only the fields we want to index
+            clean_document = {
+                'user_id': doc['user_id'],
+                'chat_id': doc['chat_id'],
+                'message_id': doc['message_id'],
+                'text': doc['text']
+            }
+            
+            # Add timestamp if present
+            if 'timestamp' in doc and doc['timestamp'] is not None:
+                clean_document['timestamp'] = doc['timestamp']
                 
             action = {
                 "_index": self.index_name,
                 "_id": doc['message_id'],
-                "_source": doc
+                "_source": clean_document
             }
             actions.append(action)
         
