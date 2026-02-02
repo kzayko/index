@@ -23,12 +23,6 @@ JAAS_CONFIG = f"""KafkaServer {{
     user_{KAFKA_USERNAME}="{KAFKA_PASSWORD}"
     user_{PRODUCER_USERNAME}="{PRODUCER_PASSWORD}";
 }};
-
-Client {{
-    org.apache.kafka.common.security.plain.PlainLoginModule required
-    username=""
-    password="";
-}};
 """
 
 if __name__ == "__main__":

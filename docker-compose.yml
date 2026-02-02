@@ -1,14 +1,6 @@
 version: '3.8'
 
 services:
-  zookeeper:
-    image: confluentinc/cp-zookeeper:7.5.0
-    environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-      ZOOKEEPER_TICK_TIME: 2000
-    networks:
-      - index-network
-
   generate-kafka-config:
     image: python:3.11-slim
     volumes:
@@ -36,27 +28,36 @@ services:
   kafka:
     image: confluentinc/cp-kafka:7.5.0
     depends_on:
-      - zookeeper
       - generate-kafka-config
     ports:
       - "9092:9092"
     env_file:
       - secrets.env
     environment:
-      KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      # KRaft mode (no Zookeeper)
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
+      KAFKA_LISTENERS: SASL_PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:29093,SASL_PLAINTEXT_INTERNAL://0.0.0.0:29092
       KAFKA_ADVERTISED_LISTENERS: SASL_PLAINTEXT://localhost:9092,SASL_PLAINTEXT_INTERNAL://kafka:29092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: SASL_PLAINTEXT:SASL_PLAINTEXT,SASL_PLAINTEXT_INTERNAL:SASL_PLAINTEXT
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: SASL_PLAINTEXT:SASL_PLAINTEXT,CONTROLLER:PLAINTEXT,SASL_PLAINTEXT_INTERNAL:SASL_PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: SASL_PLAINTEXT_INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
       KAFKA_SASL_ENABLED_MECHANISMS: PLAIN
       KAFKA_SASL_MECHANISM_INTER_BROKER_PROTOCOL: PLAIN
       KAFKA_OPTS: -Djava.security.auth.login.config=/etc/kafka/kafka-jaas.conf
       KAFKA_USERNAME: ${KAFKA_USERNAME:-indexer_user}
       KAFKA_PASSWORD: ${KAFKA_PASSWORD:-indexer_password_123}
+      # Log directories for KRaft
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
     volumes:
       - kafka-config:/etc/kafka
+      - kafka-data:/var/lib/kafka/data
     networks:
       - index-network
 
@@ -184,6 +185,7 @@ services:
 volumes:
   elasticsearch-data:
   kafka-config:
+  kafka-data:
 
 networks:
   index-network:
