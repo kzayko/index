@@ -92,8 +92,10 @@ class ElasticsearchConfig:
     """Elasticsearch connection configuration."""
     HOSTS = os.getenv('ELASTICSEARCH_HOSTS', 'http://localhost:9200').split(',')
     INDEX = os.getenv('ELASTICSEARCH_INDEX', 'messages_index')
-    USERNAME = os.getenv('ELASTICSEARCH_USERNAME', '')
-    PASSWORD = os.getenv('ELASTICSEARCH_PASSWORD', '')
+    # Support both ELASTICSEARCH_USERNAME and ELASTICSEARCH_APP_USERNAME
+    USERNAME = os.getenv('ELASTICSEARCH_USERNAME') or os.getenv('ELASTICSEARCH_APP_USERNAME', '')
+    # Support both ELASTICSEARCH_PASSWORD and ELASTICSEARCH_APP_PASSWORD
+    PASSWORD = os.getenv('ELASTICSEARCH_PASSWORD') or os.getenv('ELASTICSEARCH_APP_PASSWORD', '')
     USE_SSL = os.getenv('ELASTICSEARCH_USE_SSL', 'false').lower() == 'true'
     VERIFY_CERTS = os.getenv('ELASTICSEARCH_VERIFY_CERTS', 'false').lower() == 'true'
 

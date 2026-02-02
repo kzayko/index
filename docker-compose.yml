@@ -132,14 +132,9 @@ services:
       - KAFKA_GROUP_ID=${KAFKA_GROUP_ID:-indexer-group}
       - KAFKA_SECURITY_PROTOCOL=SASL_PLAINTEXT
       - KAFKA_SASL_MECHANISM=PLAIN
-      # KAFKA_SASL_USERNAME and KAFKA_SASL_PASSWORD loaded from secrets.env via env_file
-      - KAFKA_SASL_USERNAME=${KAFKA_USERNAME}
-      - KAFKA_SASL_PASSWORD=${KAFKA_PASSWORD}
+      # Kafka and Elasticsearch credentials loaded from secrets.env via env_file (no need to specify here)
       - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
       - ELASTICSEARCH_INDEX=${ELASTICSEARCH_INDEX:-messages_index}
-      # Elasticsearch credentials loaded from secrets.env via env_file
-      - ELASTICSEARCH_USERNAME=${ELASTICSEARCH_APP_USERNAME}
-      - ELASTICSEARCH_PASSWORD=${ELASTICSEARCH_APP_PASSWORD}
       - ELASTICSEARCH_USE_SSL=false
       - ELASTICSEARCH_VERIFY_CERTS=false
     volumes:
