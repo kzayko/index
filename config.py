@@ -2,11 +2,12 @@
 import os
 from dotenv import load_dotenv
 
-# Load .env file
-load_dotenv()
+# Load .env file (don't override existing env vars)
+load_dotenv(override=False)
 
 # Load secrets.env if it exists (for runtime secrets)
 # Try multiple paths: local, /app (Docker), and current directory
+# Note: Don't override environment variables that are already set (from docker-compose environment section)
 secrets_paths = [
     os.path.join(os.path.dirname(__file__), 'secrets.env'),
     '/app/secrets.env',
@@ -14,7 +15,8 @@ secrets_paths = [
 ]
 for secrets_path in secrets_paths:
     if os.path.exists(secrets_path):
-        load_dotenv(secrets_path, override=True)  # Override with secrets
+        # Only load variables that are not already set in environment
+        load_dotenv(secrets_path, override=False)  # Don't override existing env vars
         break
 
 
@@ -90,18 +92,35 @@ class KafkaConfig:
 
 class ElasticsearchConfig:
     """Elasticsearch connection configuration."""
-    HOSTS = os.getenv('ELASTICSEARCH_HOSTS', 'http://localhost:9200').split(',')
+    # Read variables directly from environment (set at class definition time)
+    # This ensures we get variables from docker-compose environment section
+    _hosts = os.getenv('ELASTICSEARCH_HOSTS', 'http://localhost:9200')
+    HOSTS = _hosts.split(',') if isinstance(_hosts, str) else _hosts
     INDEX = os.getenv('ELASTICSEARCH_INDEX', 'messages_index')
     # Support both ELASTICSEARCH_USERNAME and ELASTICSEARCH_APP_USERNAME
+    # Read directly from environment without dotenv override
     USERNAME = os.getenv('ELASTICSEARCH_USERNAME') or os.getenv('ELASTICSEARCH_APP_USERNAME', '')
     # Support both ELASTICSEARCH_PASSWORD and ELASTICSEARCH_APP_PASSWORD
     PASSWORD = os.getenv('ELASTICSEARCH_PASSWORD') or os.getenv('ELASTICSEARCH_APP_PASSWORD', '')
     USE_SSL = os.getenv('ELASTICSEARCH_USE_SSL', 'false').lower() == 'true'
     VERIFY_CERTS = os.getenv('ELASTICSEARCH_VERIFY_CERTS', 'false').lower() == 'true'
+    
+    # Debug: log configuration on first access
+    _debug_logged = False
+    @classmethod
+    def _debug_log(cls):
+        """Log configuration for debugging."""
+        if not cls._debug_logged:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"ElasticsearchConfig: USERNAME={cls.USERNAME[:3] + '***' if cls.USERNAME else 'None'}, "
+                       f"PASSWORD={'***' if cls.PASSWORD else 'None'}, HOSTS={cls.HOSTS}")
+            cls._debug_logged = True
 
     @classmethod
     def get_client_config(cls):
         """Get Elasticsearch client configuration."""
+        cls._debug_log()  # Log configuration for debugging
         config = {
             'hosts': cls.HOSTS,
             'verify_certs': cls.VERIFY_CERTS,
@@ -109,6 +128,10 @@ class ElasticsearchConfig:
         
         if cls.USERNAME and cls.PASSWORD:
             config['basic_auth'] = (cls.USERNAME, cls.PASSWORD)
+        else:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Elasticsearch credentials missing: USERNAME={bool(cls.USERNAME)}, PASSWORD={bool(cls.PASSWORD)}")
             
         return config
 

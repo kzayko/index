@@ -137,21 +137,22 @@ class CSVProcessor:
     def _parse_row_with_config(self, row: pd.Series, row_index: int) -> Optional[Dict[str, Any]]:
         """Parse row using configuration file."""
         csv_cols = self.config['csv_columns']
-        event_type_col = csv_cols['event_type']
-        timestamp_col = csv_cols['timestamp']
-        user_id_col = csv_cols['user_id']
-        event_data_col = csv_cols['event_data']
+        # Column indices are now integers, not column names
+        event_type_col_idx = csv_cols['event_type']
+        timestamp_col_idx = csv_cols['timestamp']
+        user_id_col_idx = csv_cols['user_id']
+        event_data_col_idx = csv_cols['event_data']
         
         # Check event type filter
-        event_type = str(row[event_type_col]) if pd.notna(row[event_type_col]) else ''
+        event_type = str(row.iloc[event_type_col_idx]) if pd.notna(row.iloc[event_type_col_idx]) else ''
         if event_type not in self.config.get('event_type_filter', []):
             return None  # Skip rows that don't match event type filter
         
         # Extract user_id
-        user_id = str(row[user_id_col]) if pd.notna(row[user_id_col]) else ''
+        user_id = str(row.iloc[user_id_col_idx]) if pd.notna(row.iloc[user_id_col_idx]) else ''
         
         # Extract timestamp
-        timestamp = row[timestamp_col]
+        timestamp = row.iloc[timestamp_col_idx]
         if pd.notna(timestamp):
             try:
                 timestamp = int(float(timestamp))
@@ -161,7 +162,7 @@ class CSVProcessor:
             timestamp = int(datetime.now().timestamp())
         
         # Parse event_data JSON
-        event_data_str = str(row[event_data_col]) if pd.notna(row[event_data_col]) else '{}'
+        event_data_str = str(row.iloc[event_data_col_idx]) if pd.notna(row.iloc[event_data_col_idx]) else '{}'
         try:
             event_data = json.loads(event_data_str)
         except json.JSONDecodeError as e:
@@ -292,7 +293,8 @@ class CSVProcessor:
             total_rows = 0
             
             # Use pandas for better CSV handling
-            df = pd.read_csv(csv_path)
+            # Read without headers since CSV file doesn't have column names
+            df = pd.read_csv(csv_path, header=None)
             total_rows = len(df)
             
             logger.info(f"File {filename} has {total_rows} rows, starting from row {start_row}")

@@ -178,38 +178,66 @@ class ElasticsearchClient:
             logger.error(f"Error in bulk indexing: {e}")
             return 0
     
-    def search(self, query_string: str, size: int = 100) -> List[str]:
+    def search(self, query_string: str, size: int = 10000) -> List[str]:
         """
         Search for messages by text.
         
+        Uses query_string query (same as Elasticsearch GUI) to find all matching documents.
+        This matches the behavior of Elasticsearch Dev Tools / Kibana Discover.
+        
         Args:
             query_string: Search query string
-            size: Maximum number of results
+            size: Maximum number of results (default 10000 to get all results)
             
         Returns:
             List of message_id values
         """
         try:
+            # Ensure query_string is a clean string without extra quotes or whitespace
+            query_string = query_string.strip()
+            
+            # Log the query string with repr to see exact bytes
+            logger.debug(f"Search query string (repr): {repr(query_string)}")
+            logger.debug(f"Search query string (utf-8): {query_string.encode('utf-8')}")
+            
+            # Use query_string query (same as Elasticsearch GUI)
+            # Don't specify fields - let it search across all fields like GUI does
             query = {
                 "query": {
-                    "match": {
-                        "text": query_string
+                    "query_string": {
+                        "query": query_string
                     }
                 },
-                "size": size,
+                "size": min(size, 10000),  # Elasticsearch default max is 10000
+                "from": 0,  # Start from beginning
+                "track_total_hits": True,  # Get accurate total count
+                "sort": [],  # No sorting like in GUI
                 "_source": ["message_id"]
             }
+            
+            # Log the query being sent
+            import json
+            logger.debug(f"Elasticsearch query: {json.dumps(query, ensure_ascii=False)}")
             
             # For Elasticsearch 8.x compatibility
             response = self.client.search(
                 index=self.index_name,
                 body=query
             )
+            
+            # Log total hits for debugging
+            total_hits = response.get("hits", {}).get("total", {})
+            if isinstance(total_hits, dict):
+                total_value = total_hits.get("value", 0)
+            else:
+                total_value = total_hits
+            logger.info(f"Search for '{query_string}' (bytes: {query_string.encode('utf-8')}): found {total_value} total matches, returning {len(response['hits']['hits'])} results")
+            
             message_ids = [
                 hit["_source"]["message_id"] 
                 for hit in response["hits"]["hits"]
             ]
             return message_ids
         except Exception as e:
-            logger.error(f"Error searching: {e}")
+            logger.error(f"Error searching: {e}", exc_info=True)
             return []

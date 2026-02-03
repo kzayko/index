@@ -1,7 +1,8 @@
 """HTTP API for searching messages."""
 import logging
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+import json
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from elasticsearch_client import ElasticsearchClient
 
 logging.basicConfig(
@@ -14,47 +15,85 @@ app = FastAPI(title="Message Search API", version="1.0.0")
 es_client = ElasticsearchClient()
 
 
-class SearchRequest(BaseModel):
-    """Search request model."""
-    query: str
-
-
-class SearchResponse(BaseModel):
-    """Search response model."""
-    message_ids: list[str]
-    count: int
-
-
 @app.on_event("startup")
 async def startup_event():
     """Check Elasticsearch connection on startup."""
     if not es_client.check_connection():
         logger.error("Cannot connect to Elasticsearch")
         raise RuntimeError("Elasticsearch connection failed")
+    logger.info("API started successfully")
 
 
-@app.post("/search", response_model=SearchResponse)
-async def search_messages(request: SearchRequest):
+@app.post("/search")
+async def search_messages(request: Request):
     """
     Search for messages by text query.
     
     Args:
-        request: Search request with query string
+        request: HTTP request with JSON body containing query string
         
     Returns:
-        List of message_id values matching the query
+        JSON response with message_ids and count
     """
-    if not request.query or not request.query.strip():
-        raise HTTPException(status_code=400, detail="Query string cannot be empty")
-    
     try:
-        message_ids = es_client.search(request.query.strip())
-        return SearchResponse(
-            message_ids=message_ids,
-            count=len(message_ids)
-        )
+        # Get raw body bytes
+        body_bytes = await request.body()
+        
+        # Decode as UTF-8
+        body_str = body_bytes.decode('utf-8')
+        
+        # Parse JSON
+        data = json.loads(body_str)
+        query = data.get('query', '').strip()
+        
+        if not query:
+            raise HTTPException(status_code=400, detail="Query string cannot be empty")
+        
+        # Fix double-encoded UTF-8 from Windows console
+        # Windows console may use cp1251, so UTF-8 bytes get incorrectly decoded, then re-encoded as UTF-8
+        # Pattern: original UTF-8 bytes -> wrong decode -> UTF-8 encode -> double encoding
+        original_query = query
+        query_bytes = query.encode('utf-8')
+        
+        # Check for double encoding pattern (contains \xc2 which is common in double-encoded UTF-8)
+        if b'\xc2' in query_bytes:
+            try:
+                # Try cp1251 first (most common for Russian Windows)
+                intermediate_bytes = query.encode('cp1251', errors='ignore')
+                fixed_query = intermediate_bytes.decode('utf-8', errors='ignore')
+                
+                if fixed_query != query and len(fixed_query) > 0:
+                    # Verify it's valid UTF-8
+                    fixed_query.encode('utf-8')
+                    query = fixed_query
+                    logger.info(f"Fixed double-encoded query (cp1251): {repr(original_query)} -> {repr(query)}")
+            except (UnicodeDecodeError, UnicodeEncodeError):
+                # If cp1251 doesn't work, try cp1252
+                try:
+                    intermediate_bytes = query.encode('cp1252', errors='ignore')
+                    fixed_query = intermediate_bytes.decode('utf-8', errors='ignore')
+                    
+                    if fixed_query != query and len(fixed_query) > 0:
+                        fixed_query.encode('utf-8')
+                        query = fixed_query
+                        logger.info(f"Fixed double-encoded query (cp1252): {repr(original_query)} -> {repr(query)}")
+                except (UnicodeDecodeError, UnicodeEncodeError):
+                    pass
+        
+        logger.info(f"Search query: {repr(query)} (bytes: {query.encode('utf-8')})")
+        
+        # Search in Elasticsearch
+        message_ids = es_client.search(query)
+        
+        return JSONResponse(content={
+            "message_ids": message_ids,
+            "count": len(message_ids)
+        })
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON decode error: {e}")
+        raise HTTPException(status_code=400, detail=f"Invalid JSON: {str(e)}")
     except Exception as e:
-        logger.error(f"Search error: {e}")
+        logger.error(f"Search error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
 
 
