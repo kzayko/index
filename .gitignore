@@ -52,3 +52,10 @@ test.csv
 # OS
 .DS_Store
 Thumbs.db
+datalapki.json
+clap.json
+activate_venv.bat
+activate_venv.ps1
+check_encoding.ps1
+profile_state.json
+VENV_SETUP.md

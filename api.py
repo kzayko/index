@@ -27,13 +27,26 @@ async def startup_event():
 @app.post("/search")
 async def search_messages(request: Request):
     """
-    Search for messages by text query.
+    Search for messages by text query with optional filters.
+    
+    Request body format:
+    {
+        "query": "search text",           # Required: text search query
+        "user_id": "user123",             # Optional: filter by exact user_id
+        "date_from": "2024-01-01",        # Optional: start date (ISO 8601 format)
+        "date_to": "2024-12-31"           # Optional: end date (ISO 8601 format)
+    }
+    
+    Date format examples:
+    - "2024-01-01" (date only)
+    - "2024-01-01T00:00:00" (date with time)
+    - "2024-01-01T00:00:00Z" (date with time and timezone)
     
     Args:
-        request: HTTP request with JSON body containing query string
+        request: HTTP request with JSON body containing query string and optional filters
         
     Returns:
-        JSON response with message_ids and count
+        JSON response with full documents (user_id, chat_id, message_id, text, timestamp) and count
     """
     try:
         # Get raw body bytes
@@ -48,6 +61,25 @@ async def search_messages(request: Request):
         
         if not query:
             raise HTTPException(status_code=400, detail="Query string cannot be empty")
+        
+        # Extract optional filters
+        user_id = data.get('user_id')
+        if user_id:
+            user_id = str(user_id).strip()
+            if not user_id:
+                user_id = None
+        
+        date_from = data.get('date_from')
+        if date_from:
+            date_from = str(date_from).strip()
+            if not date_from:
+                date_from = None
+        
+        date_to = data.get('date_to')
+        if date_to:
+            date_to = str(date_to).strip()
+            if not date_to:
+                date_to = None
         
         # Fix double-encoded UTF-8 from Windows console
         # Windows console may use cp1251, so UTF-8 bytes get incorrectly decoded, then re-encoded as UTF-8
@@ -80,18 +112,36 @@ async def search_messages(request: Request):
                 except (UnicodeDecodeError, UnicodeEncodeError):
                     pass
         
-        logger.info(f"Search query: {repr(query)} (bytes: {query.encode('utf-8')})")
+        # Log search parameters
+        filters = []
+        if user_id:
+            filters.append(f"user_id={user_id}")
+        if date_from:
+            filters.append(f"date_from={date_from}")
+        if date_to:
+            filters.append(f"date_to={date_to}")
         
-        # Search in Elasticsearch
-        message_ids = es_client.search(query)
+        filter_str = f" with filters: {', '.join(filters)}" if filters else ""
+        logger.info(f"Search query: {repr(query)}{filter_str}")
+        
+        # Search in Elasticsearch with filters
+        documents = es_client.search(
+            query_string=query,
+            user_id=user_id,
+            date_from=date_from,
+            date_to=date_to
+        )
         
         return JSONResponse(content={
-            "message_ids": message_ids,
-            "count": len(message_ids)
+            "results": documents,
+            "count": len(documents)
         })
     except json.JSONDecodeError as e:
         logger.error(f"JSON decode error: {e}")
         raise HTTPException(status_code=400, detail=f"Invalid JSON: {str(e)}")
+    except ValueError as e:
+        logger.error(f"Validation error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Search error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")

@@ -10,4 +10,6 @@ venv/
 .gitignore
 .env
 *.log
+parsed_messages.json
 .DS_Store
+data/

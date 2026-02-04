@@ -75,11 +75,20 @@ class StateManager:
 class CSVProcessor:
     """Processes CSV files and sends messages to Kafka."""
     
-    def __init__(self, data_dir: str = 'data', state_file: str = 'processing_state.json', config_file: str = 'parser_config.json'):
-        """Initialize CSV processor."""
+    def __init__(self, data_dir: str = 'data', state_file: str = 'processing_state.json', 
+                 config_file: str = 'parser_config.json', async_kafka: bool = True):
+        """
+        Initialize CSV processor.
+        
+        Args:
+            data_dir: Directory containing CSV files
+            state_file: File to store processing state
+            config_file: Configuration file path
+            async_kafka: If True, use async Kafka sending for better performance (default: True)
+        """
         self.data_dir = Path(data_dir)
         self.state_manager = StateManager(state_file)
-        self.producer = KafkaMessageProducer()
+        self.producer = KafkaMessageProducer(async_mode=async_kafka)
         self.config = self._load_config(config_file)
     
     def _load_config(self, config_file: str) -> Dict[str, Any]:
@@ -122,6 +131,7 @@ class CSVProcessor:
         Convert CSV row to message format (as in message.json).
         
         Uses configuration from parser_config.json to map columns and extract data.
+        Row is a pandas Series with integer indices (0, 1, 2, ...) since CSV has no headers.
         """
         try:
             # If config is available, use it
@@ -131,7 +141,7 @@ class CSVProcessor:
                 # Fallback to old method
                 return self._parse_row_legacy(row, row_index)
         except Exception as e:
-            logger.error(f"Error converting row {row_index} to message: {e}")
+            logger.error(f"Error converting row {row_index} to message: {e}", exc_info=True)
             return None
     
     def _parse_row_with_config(self, row: pd.Series, row_index: int) -> Optional[Dict[str, Any]]:
@@ -260,6 +270,7 @@ class CSVProcessor:
     def process_file(self, file_path: Path) -> int:
         """
         Process a single CSV file and send messages to Kafka.
+        Processes file in batches of 1000 rows to balance memory usage and performance.
         
         Returns:
             Number of messages successfully sent
@@ -288,50 +299,96 @@ class CSVProcessor:
             if start_row > 0:
                 logger.info(f"Resuming from row {start_row} in {filename}")
             
-            # Read CSV file
             messages_sent = 0
-            total_rows = 0
+            row_index = 0
+            batch_size = 1000
             
-            # Use pandas for better CSV handling
-            # Read without headers since CSV file doesn't have column names
-            df = pd.read_csv(csv_path, header=None)
-            total_rows = len(df)
-            
-            logger.info(f"File {filename} has {total_rows} rows, starting from row {start_row}")
-            
-            # Process rows
-            for idx, row in df.iterrows():
-                if idx < start_row:
-                    continue
+            # Process file in batches of 1000 rows
+            try:
+                # Use pandas read_csv with chunksize=1000 for batch processing
+                # header=None because CSV doesn't have column names
+                chunk_iterator = pd.read_csv(
+                    csv_path, 
+                    header=None, 
+                    chunksize=batch_size,
+                    iterator=True,
+                    dtype=str,  # Read all as strings to avoid type conversion issues
+                    keep_default_na=False,  # Don't convert empty strings to NaN
+                    na_filter=False  # Don't filter NaN values
+                )
                 
-                # Convert row to message
-                message = self.csv_row_to_message(row, idx)
-                
-                if message:
-                    # Send to Kafka
-                    if self.producer.send_message(message):
-                        messages_sent += 1
-                        # Save state after each successful message
-                        self.state_manager.save_state(filename, idx + 1)
-                        
-                        if messages_sent % 100 == 0:
-                            logger.info(f"Sent {messages_sent} messages from {filename}")
-                    else:
-                        logger.error(f"Failed to send message from row {idx}")
-                        # Stop on error to preserve state
+                for chunk in chunk_iterator:
+                    # Skip rows until we reach the resume position
+                    if row_index < start_row:
+                        # Skip entire chunk if it's before resume position
+                        chunk_start = row_index
+                        chunk_end = row_index + len(chunk)
+                        if chunk_end <= start_row:
+                            row_index = chunk_end
+                            continue
+                        # Otherwise, skip rows within this chunk
+                        skip_count = start_row - row_index
+                        chunk = chunk.iloc[skip_count:]
+                        row_index = start_row
+                    
+                    # Process batch of rows
+                    if len(chunk) == 0:
                         break
-                else:
-                    logger.debug(f"Skipping row {idx} due to missing required fields")
-            
-            # Mark file as complete if all rows processed
-            if messages_sent > 0 and idx >= total_rows - 1:
-                self.state_manager.mark_file_complete(filename)
-                logger.info(f"Completed processing {filename}: {messages_sent} messages sent")
+                    
+                    # Collect messages from this batch
+                    batch_messages = []
+                    batch_row_indices = []
+                    
+                    for idx_in_chunk, row in chunk.iterrows():
+                        # Convert row to message
+                        message = self.csv_row_to_message(row, row_index)
+                        
+                        if message:
+                            batch_messages.append(message)
+                            batch_row_indices.append(row_index)
+                        else:
+                            logger.debug(f"Skipping row {row_index} due to missing required fields")
+                        
+                        row_index += 1
+                    
+                    # Send batch to Kafka - use batch send for better performance
+                    if batch_messages:
+                        batch_sent = self.producer.send_batch(batch_messages)
+                        messages_sent += batch_sent
+                        
+                        # Only check for errors if sync mode (async mode errors are checked in flush)
+                        if not self.producer.async_mode and batch_sent < len(batch_messages):
+                            logger.error(f"Failed to send {len(batch_messages) - batch_sent} messages in batch")
+                            # Save state at the last successfully sent row
+                            if batch_sent > 0:
+                                self.state_manager.save_state(filename, batch_row_indices[batch_sent - 1] + 1)
+                            else:
+                                # If all messages failed, save state before this batch
+                                self.state_manager.save_state(filename, batch_row_indices[0])
+                            return messages_sent
+                        
+                        # Save state after successful batch
+                        # Save at the last processed row in this batch
+                        last_row_in_batch = batch_row_indices[-1] + 1
+                        self.state_manager.save_state(filename, last_row_in_batch)
+                        
+                        logger.info(f"Sent batch: {batch_sent} messages from {filename} (rows {batch_row_indices[0]}-{batch_row_indices[-1]}, total: {messages_sent})")
+                
+                # Mark file as complete if we processed all rows
+                if messages_sent > 0:
+                    self.state_manager.mark_file_complete(filename)
+                    logger.info(f"Completed processing {filename}: {messages_sent} messages sent (total rows processed: {row_index})")
+                
+            except StopIteration:
+                # End of file reached
+                if messages_sent > 0:
+                    self.state_manager.mark_file_complete(filename)
+                    logger.info(f"Completed processing {filename}: {messages_sent} messages sent (total rows processed: {row_index})")
             
             return messages_sent
             
         except Exception as e:
-            logger.error(f"Error processing file {filename}: {e}")
+            logger.error(f"Error processing file {filename}: {e}", exc_info=True)
             return messages_sent
         finally:
             # Clean up temporary file

@@ -178,46 +178,149 @@ class ElasticsearchClient:
             logger.error(f"Error in bulk indexing: {e}")
             return 0
     
-    def search(self, query_string: str, size: int = 10000) -> List[str]:
+    def search(
+        self, 
+        query_string: str, 
+        user_id: Optional[str] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+        size: int = 10000
+    ) -> List[Dict[str, Any]]:
         """
-        Search for messages by text.
+        Search for messages by text with optional filters.
         
         Uses query_string query (same as Elasticsearch GUI) to find all matching documents.
-        This matches the behavior of Elasticsearch Dev Tools / Kibana Discover.
+        Supports filtering by user_id and date range.
         
         Args:
-            query_string: Search query string
+            query_string: Search query string (required)
+            user_id: Optional filter by exact user_id match
+            date_from: Optional start date (ISO 8601 format, e.g., "2024-01-01" or "2024-01-01T00:00:00")
+            date_to: Optional end date (ISO 8601 format, e.g., "2024-12-31" or "2024-12-31T23:59:59")
             size: Maximum number of results (default 10000 to get all results)
             
         Returns:
-            List of message_id values
+            List of documents with all fields (user_id, chat_id, message_id, text, timestamp)
         """
         try:
             # Ensure query_string is a clean string without extra quotes or whitespace
             query_string = query_string.strip()
             
+            if not query_string:
+                raise ValueError("query_string cannot be empty")
+            
             # Log the query string with repr to see exact bytes
             logger.debug(f"Search query string (repr): {repr(query_string)}")
             logger.debug(f"Search query string (utf-8): {query_string.encode('utf-8')}")
             
-            # Use query_string query (same as Elasticsearch GUI)
-            # Don't specify fields - let it search across all fields like GUI does
+            # Build bool query with must (text search) and filters (user_id, date range)
+            must_clauses = []
+            filter_clauses = []
+            
+            # Text search using query_string
+            must_clauses.append({
+                "query_string": {
+                    "query": query_string
+                }
+            })
+            
+            # Filter by user_id if provided
+            if user_id:
+                filter_clauses.append({
+                    "term": {
+                        "user_id": user_id
+                    }
+                })
+                logger.debug(f"Filtering by user_id: {user_id}")
+            
+            # Filter by date range if provided
+            if date_from or date_to:
+                from datetime import datetime
+                date_range = {}
+                
+                # Convert ISO 8601 strings to Unix timestamps (seconds)
+                # Timestamp is stored as Unix timestamp (integer), but mapped as date type
+                # Elasticsearch date type accepts epoch_second format
+                if date_from:
+                    try:
+                        # Try parsing as ISO 8601 string
+                        if 'T' in date_from or len(date_from) == 10:  # ISO format or date only
+                            # Handle timezone
+                            date_str = date_from.replace('Z', '+00:00')
+                            if '+' not in date_str and '-' in date_str and len(date_str) > 10:
+                                # Might be missing timezone, assume local
+                                pass
+                            try:
+                                dt = datetime.fromisoformat(date_str)
+                            except ValueError:
+                                # Try parsing as date only
+                                dt = datetime.strptime(date_from, '%Y-%m-%d')
+                            # Convert to Unix timestamp (seconds)
+                            date_range["gte"] = int(dt.timestamp())
+                        else:
+                            # Assume it's already a Unix timestamp string
+                            date_range["gte"] = int(float(date_from))
+                    except (ValueError, AttributeError, TypeError) as e:
+                        logger.warning(f"Failed to parse date_from '{date_from}': {e}")
+                        # Skip date filter if parsing fails
+                        date_from = None
+                
+                if date_to:
+                    try:
+                        # Try parsing as ISO 8601 string
+                        if 'T' in date_to or len(date_to) == 10:  # ISO format or date only
+                            # Handle timezone
+                            date_str = date_to.replace('Z', '+00:00')
+                            if '+' not in date_str and '-' in date_str and len(date_str) > 10:
+                                # Might be missing timezone, assume local
+                                pass
+                            try:
+                                dt = datetime.fromisoformat(date_str)
+                            except ValueError:
+                                # Try parsing as date only, set to end of day
+                                dt = datetime.strptime(date_to, '%Y-%m-%d')
+                                dt = dt.replace(hour=23, minute=59, second=59)
+                            # Convert to Unix timestamp (seconds)
+                            date_range["lte"] = int(dt.timestamp())
+                        else:
+                            # Assume it's already a Unix timestamp string
+                            date_range["lte"] = int(float(date_to))
+                    except (ValueError, AttributeError, TypeError) as e:
+                        logger.warning(f"Failed to parse date_to '{date_to}': {e}")
+                        # Skip date filter if parsing fails
+                        date_to = None
+                
+                # Only add date filter if we have valid dates
+                if date_range:
+                    # Elasticsearch date type accepts epoch_second (Unix timestamp in seconds) as integer
+                    filter_clauses.append({
+                        "range": {
+                            "timestamp": date_range
+                        }
+                    })
+                    logger.debug(f"Filtering by date range: {date_from} to {date_to} (converted to Unix timestamps: {date_range})")
+            
+            # Build the query
             query = {
                 "query": {
-                    "query_string": {
-                        "query": query_string
+                    "bool": {
+                        "must": must_clauses
                     }
                 },
                 "size": min(size, 10000),  # Elasticsearch default max is 10000
                 "from": 0,  # Start from beginning
                 "track_total_hits": True,  # Get accurate total count
                 "sort": [],  # No sorting like in GUI
-                "_source": ["message_id"]
+                "_source": True  # Return all fields
             }
+            
+            # Add filters if any
+            if filter_clauses:
+                query["query"]["bool"]["filter"] = filter_clauses
             
             # Log the query being sent
             import json
-            logger.debug(f"Elasticsearch query: {json.dumps(query, ensure_ascii=False)}")
+            logger.debug(f"Elasticsearch query: {json.dumps(query, ensure_ascii=False, indent=2)}")
             
             # For Elasticsearch 8.x compatibility
             response = self.client.search(
@@ -231,13 +334,22 @@ class ElasticsearchClient:
                 total_value = total_hits.get("value", 0)
             else:
                 total_value = total_hits
-            logger.info(f"Search for '{query_string}' (bytes: {query_string.encode('utf-8')}): found {total_value} total matches, returning {len(response['hits']['hits'])} results")
             
-            message_ids = [
-                hit["_source"]["message_id"] 
+            filters_info = []
+            if user_id:
+                filters_info.append(f"user_id={user_id}")
+            if date_from or date_to:
+                filters_info.append(f"date={date_from or '*'}-{date_to or '*'}")
+            
+            filter_str = f" with filters: {', '.join(filters_info)}" if filters_info else ""
+            logger.info(f"Search for '{query_string}'{filter_str}: found {total_value} total matches, returning {len(response['hits']['hits'])} results")
+            
+            # Return full documents instead of just message_ids
+            documents = [
+                hit["_source"]
                 for hit in response["hits"]["hits"]
             ]
-            return message_ids
+            return documents
         except Exception as e:
             logger.error(f"Error searching: {e}", exc_info=True)
             return []
